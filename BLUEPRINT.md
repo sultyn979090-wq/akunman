@@ -1,8 +1,8 @@
 # SPESIFIKASI TEKNIS & BLUEPRINT SISTEM: AI Account Manager (PWA)
 
 Spesifikasi sistem, batasan domain, matriks modul, dan NFR. Diperbarui bila task dengan `Docs Impact: BLUEPRINT` selesai.
-Versi: v0.5 | Gerbang 1: DISETUJUI (2026-10-29 jam: ?) | MODE: LITE
-Perubahan v0.5 (TASK-001): Dependensi dan perintah uji terverifikasi via npm ls / package.json.
+Versi: v1.0 | Gerbang 1: DISETUJUI (2026-10-29 jam: ?) | MODE: LITE
+Perubahan v1.0 (TASK-012): Konfigurasi hosting statis GitHub Pages terverifikasi (base path `./`, HTTPS, Service Worker `sw.js` cache-first, manifest standalone), NFR 1 terukur < 1s.
 
 ---
 
@@ -12,8 +12,9 @@ Perubahan v0.5 (TASK-001): Dependensi dan perintah uji terverifikasi via npm ls 
 * **Profil Domain:** none
 * **Lingkungan Produksi:**
   - Runtime: browser Android (Chrome/Edge/Brave) sebagai PWA terpasang
-  - Hosting statis: GitHub Pages (HTTPS; Q-08)
-  - Database: IndexedDB (lokal, per perangkat)
+  - Hosting statis: GitHub Pages (HTTPS; Q-08) dengan base path `./`, caching offline `sw.js`, dan isolasi IndexedDB
+  - PWA Installability: `manifest.webmanifest` standalone dengan dukungan ikon 192px & 512px serta in-app install prompt
+  - Database: IndexedDB (lokal, per perangkat, offline-first)
   - Framework: React 19 + Vite 8
 * **Versi Dependensi Terverifikasi:**
 

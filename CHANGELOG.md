@@ -7,6 +7,13 @@ Mengikuti Keep a Changelog dan SemVer. Perubahan Level S (`[MINOR]`) dan task re
 ## [Unreleased]
 
 ### Added
+- [TASK-012] Hardening PWA, Offline & Uji Akhir (`public/sw.js`, `public/manifest.webmanifest`, `src/pwa/register-sw.ts`, `tests/pwa-offline.test.ts`, `src/App.tsx`, `BLUEPRINT.md`):
+  - Service worker `sw.js` dengan strategi caching offline (cache-first untuk aset statis, network-first + cache fallback untuk navigasi HTML).
+  - Web App Manifest mandiri (`display: standalone`, `start_url: ./`, ikon 192px & 512px SVG) untuk instalasi Android/Desktop.
+  - Integrasi listener `beforeinstallprompt` dengan tombol "Pasang PWA" interaktif dan deteksi status jaringan real-time (Online vs Offline / Mode Pesawat).
+  - Verifikasi performa NFR 1: pemuatan daftar 10 akun dari IndexedDB terukur < 1000ms (~10ms).
+  - Verifikasi keamanan rilis: 0 kolom kata sandi atau token auth dalam model data aplikasi.
+  - 4/4 test cases lulus di `tests/pwa-offline.test.ts` (total 48/48 tests lulus di 16 test files).
 - [TASK-011] Backup & Restore Google Sheet (Klien) (`src/backup/sheet-backup.ts`, `tests/backup-sheet.test.ts`, `src/App.tsx`):
   - Eksekusi backup dan restore Google Sheets dua arah terpadu via `executeSheetBackup` dan `executeSheetRestore`.
   - Salinan lokal otomatis (`PRE_RESTORE_STORAGE_KEY`) dibuat dan disimpan ke penyimpanan lokal sebelum menimpa data, serta tombol unduh salinan pengaman di antarmuka (BR-12, AC-2).

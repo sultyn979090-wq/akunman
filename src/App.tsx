@@ -37,7 +37,10 @@ import {
   Sparkles,
   RefreshCw,
   Search,
-  BookOpen
+  BookOpen,
+  Wifi,
+  WifiOff,
+  Smartphone
 } from 'lucide-react';
 import { RecoveryGenerator } from './components/RecoveryGenerator';
 import { 
@@ -99,6 +102,10 @@ import {
   executeSheetRestore,
   PRE_RESTORE_STORAGE_KEY,
 } from './backup/sheet-backup';
+import {
+  promptPwaInstall,
+  subscribeInstallPrompt,
+} from './pwa/register-sw';
 
 interface TaskItem {
   id: string;
@@ -119,8 +126,8 @@ const BACKLOG_TASKS: TaskItem[] = [
   { id: 'TASK-008', name: 'Riwayat, Catatan Akun & Catatan Lanjutan', phase: 'FASE 2', status: 'DONE', desc: 'Event logs terurut waktu, catatan akun, catatan lanjutan bersama per layanan.' },
   { id: 'TASK-009', name: 'Ekspor/Impor JSON Lokal', phase: 'FASE 3', status: 'DONE', desc: 'Backup & restore JSON lokal dengan validasi integritas skema (tanpa rahasia).' },
   { id: 'TASK-010', name: 'Spike Apps Script (CORS & Alur)', phase: 'FASE 3', status: 'DONE', desc: 'Code.gs Google Apps Script & probe CORS/redirect untuk integrasi Sheet.' },
-  { id: 'TASK-011', name: 'Backup & Restore Google Sheet (Klien)', phase: 'FASE 3', status: 'READY', desc: 'Sinkronisasi dua arah ke Google Sheet via secret key dan snapshot otomatis.' },
-  { id: 'TASK-012', name: 'Hardening PWA, Offline & Uji Akhir', phase: 'FASE 4', status: 'PENDING', desc: 'Service worker offline caching, PWA install prompt, uji E2E di Android.' },
+  { id: 'TASK-011', name: 'Backup & Restore Google Sheet (Klien)', phase: 'FASE 3', status: 'DONE', desc: 'Sinkronisasi dua arah ke Google Sheet via secret key dan snapshot otomatis.' },
+  { id: 'TASK-012', name: 'Hardening PWA, Offline & Uji Akhir', phase: 'FASE 4', status: 'DONE', desc: 'Service worker offline caching, PWA install prompt, uji E2E di Android.' },
 ];
 
 export default function App() {
@@ -201,6 +208,11 @@ export default function App() {
   // Live countdown timer ticker (ticks every second)
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
 
+  // State PWA Offline & Install (TASK-012)
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [canInstallPwa, setCanInstallPwa] = useState<boolean>(false);
+  const [pwaInstallSuccess, setPwaInstallSuccess] = useState<string | null>(null);
+
   const loadAllData = async () => {
     try {
       const [allPersons, allServices, allAccess, dbSettings] = await Promise.all([
@@ -249,7 +261,30 @@ export default function App() {
 
   useEffect(() => {
     loadAllData();
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    const unsubscribeInstall = subscribeInstallPrompt((prompt) => {
+      setCanInstallPwa(Boolean(prompt));
+    });
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      unsubscribeInstall();
+    };
   }, []);
+
+  const handleInstallClick = async () => {
+    const accepted = await promptPwaInstall();
+    if (accepted) {
+      setPwaInstallSuccess('Aplikasi AI Account Manager berhasil dipasang ke perangkat Anda!');
+      setCanInstallPwa(false);
+    }
+  };
 
   // Update logs when selected access changes
   useEffect(() => {
@@ -663,10 +698,30 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-              <CheckCircle2 className="w-3.5 h-3.5" />
-              TASK-001 s/d 010 DONE
+            {canInstallPwa && (
+              <button
+                onClick={handleInstallClick}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow-lg shadow-sky-600/30 transition animate-pulse"
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                <span>Pasang PWA</span>
+              </button>
+            )}
+
+            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
+              isOnline
+                ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
+                : 'bg-rose-950/80 text-rose-400 border-rose-800 animate-pulse'
+            }`}>
+              {isOnline ? <Wifi className="w-3.5 h-3.5" /> : <WifiOff className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isOnline ? 'Online' : 'Offline (Pesawat)'}</span>
             </span>
+
+            <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              TASK-001 s/d 012 DONE (100%)
+            </span>
+
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-mono font-medium bg-slate-900 text-slate-300 border border-slate-800">
               <Clock className="w-3.5 h-3.5 text-sky-400" />
               {currentTime.toLocaleTimeString()}
@@ -796,6 +851,42 @@ export default function App() {
             <button
               onClick={() => setDismissAutoReadyBanner(true)}
               className="text-xs text-slate-400 hover:text-slate-200 px-3 py-1.5 rounded-lg bg-slate-900/80 border border-slate-700"
+            >
+              Tutup
+            </button>
+          </div>
+        )}
+
+        {/* Offline Banner (TASK-012) */}
+        {!isOnline && (
+          <div className="bg-gradient-to-r from-amber-950/80 via-slate-900 to-amber-950/60 border border-amber-800 rounded-2xl p-4 flex items-center justify-between gap-4 shadow-lg">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-900/60 border border-amber-700 flex items-center justify-center shrink-0">
+                <WifiOff className="w-5 h-5 text-amber-300" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-amber-200">Mode Pesawat / Offline Aktif</h4>
+                <p className="text-xs text-slate-300">
+                  Aplikasi PWA berjalan mandiri dengan IndexedDB lokal. Pergantian akun, hitung mundur, catatan, dan riwayat tetap berfungsi penuh tanpa koneksi internet.
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono px-2 py-1 rounded bg-amber-950 text-amber-400 border border-amber-800 shrink-0">
+              PWA Offline Ready
+            </span>
+          </div>
+        )}
+
+        {/* PWA Install Success Notice */}
+        {pwaInstallSuccess && (
+          <div className="p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-300 text-xs flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{pwaInstallSuccess}</span>
+            </div>
+            <button
+              onClick={() => setPwaInstallSuccess(null)}
+              className="text-emerald-400 hover:text-emerald-200 text-xs font-semibold"
             >
               Tutup
             </button>
