@@ -1,0 +1,8 @@
+{
+  "name": "Remix Akun manager",
+  "description": "Streamline project bundles and manage seamless handovers efficiently with this integrated management tool.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
