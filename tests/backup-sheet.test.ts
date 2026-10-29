@@ -9,6 +9,7 @@ import {
   executeSheetBackup,
   executeSheetRestore,
   PRE_RESTORE_STORAGE_KEY,
+  countEntities,
 } from '../src/backup/sheet-backup';
 import {
   getDatabase,
@@ -18,6 +19,8 @@ import {
   getSettings,
   saveSettings,
   getAllPersons,
+  getAllAccess,
+  getLogsByAccessId,
 } from '../src/storage/db';
 import { createServiceWithValidation } from '../src/services/service-manager';
 
@@ -321,4 +324,322 @@ describe('backup-sheet.test', () => {
     expect(resWrongKey.message).toContain('Akses ditolak');
     expect((await getAllPersons(db))[0].ownerName).toBe('Budi Santoso');
   });
+
+  it('restore_aborts_when_snapshot_fails - Fail-Closed: Jika pembuatan salinan pengaman gagal, restore harus dibatalkan tanpa mengubah IndexedDB (AC-1)', async () => {
+    const db = await getDatabase(getTestDbName());
+    await seedTestData(db);
+
+    // Mock respon remote yang valid (berisi akun Siti Rahma)
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          services: [],
+          persons: [
+            {
+              id: 'person-siti',
+              ownerName: 'Siti Rahma',
+              googleEmail: 'siti@example.com',
+              label: 'Akun Kedua',
+              note: '',
+              createdAt: '2026-10-29T10:00:00Z',
+              updatedAt: '2026-10-29T10:00:00Z',
+            },
+          ],
+          access: [],
+          logs: [],
+          handoffNotes: [],
+          settings: { id: 'default', resetTimezone: 'America/Los_Angeles', maxPersons: 10 },
+        },
+      }),
+    } as any);
+
+    // Mock storage yang gagal menulis (simulasi Storage QuotaExceededError)
+    const failingStorage: Storage = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('QuotaExceededError: LocalStorage quota exceeded');
+      },
+      removeItem: () => {},
+      clear: () => {},
+      key: () => null,
+      length: 0,
+    };
+
+    const restoreRes = await executeSheetRestore(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      {
+        confirmOverwrite: () => true,
+        storage: failingStorage,
+      },
+      db
+    );
+
+    // Verifikasi pemulihan dibatalkan (Fail-Closed)
+    expect(restoreRes.success).toBe(false);
+    expect(restoreRes.snapshotCreated).toBe(false);
+    expect(restoreRes.message).toContain('salinan pengaman gagal dibuat');
+
+    // Verifikasi data lokal di IndexedDB sama sekali TIDAK diubah atau dihapus
+    const personsAfter = await getAllPersons(db);
+    expect(personsAfter.length).toBe(1);
+    expect(personsAfter[0].ownerName).toBe('Budi Santoso');
+  });
+
+  it('restore_empty_sheet_rejected - Sheet Kosong: Jika Sheet berisi 0 entitas sedangkan DB lokal berisi > 0 entitas, restore ditolak (AC-2)', async () => {
+    const db = await getDatabase(getTestDbName());
+    await seedTestData(db);
+
+    // Simulasi respons Sheet dengan 0 entitas (lembar kerja kosong / baru)
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          services: [],
+          persons: [],
+          access: [],
+          logs: [],
+          handoffNotes: [],
+          settings: { id: 'default', resetTimezone: 'America/Los_Angeles', maxPersons: 10 },
+        },
+      }),
+    } as any);
+
+    const restoreRes = await executeSheetRestore(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      { confirmOverwrite: () => true },
+      db
+    );
+
+    // Verifikasi penolakan pemulihan sheet kosong
+    expect(restoreRes.success).toBe(false);
+    expect(restoreRes.message).toContain('Sheet kosong (0 entitas)');
+    expect(restoreRes.message).toContain('Data lokal tidak diubah');
+
+    // Verifikasi data lokal tetap utuh
+    const personsAfter = await getAllPersons(db);
+    expect(personsAfter.length).toBe(1);
+    expect(personsAfter[0].ownerName).toBe('Budi Santoso');
+  });
+
+  it('restore_confirmation_with_counts - Konfirmasi Overwrite menerima perbandingan entitas remote vs local (AC-3)', async () => {
+    const db = await getDatabase(getTestDbName());
+    await seedTestData(db); // Ada 1 service, 1 person, 1 access, 1 log -> total 4 entitas
+
+    // Respons Sheet memiliki 2 persons dan 1 service -> total 3 entitas
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          services: [
+            {
+              id: 'svc-remote',
+              name: 'Remote Service',
+              urlTemplate: 'https://example.com/',
+              usesAuthuser: false,
+              resetRule: { mode: 'manual' },
+              createdAt: '2026-10-29T10:00:00Z',
+              updatedAt: '2026-10-29T10:00:00Z',
+            },
+          ],
+          persons: [
+            {
+              id: 'p1',
+              ownerName: 'Remote 1',
+              googleEmail: 'r1@example.com',
+              label: '',
+              note: '',
+              createdAt: '2026-10-29T10:00:00Z',
+              updatedAt: '2026-10-29T10:00:00Z',
+            },
+            {
+              id: 'p2',
+              ownerName: 'Remote 2',
+              googleEmail: 'r2@example.com',
+              label: '',
+              note: '',
+              createdAt: '2026-10-29T10:00:00Z',
+              updatedAt: '2026-10-29T10:00:00Z',
+            },
+          ],
+          access: [],
+          logs: [],
+          handoffNotes: [],
+          settings: { id: 'default', resetTimezone: 'America/Los_Angeles', maxPersons: 10 },
+        },
+      }),
+    } as any);
+
+    let capturedCounts: any = null;
+    const confirmOverwrite = vi.fn(({ remote, local }) => {
+      capturedCounts = { remote, local };
+      return false; // Pengguna membatalkan
+    });
+
+    const restoreRes = await executeSheetRestore(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      { confirmOverwrite },
+      db
+    );
+
+    expect(confirmOverwrite).toHaveBeenCalledTimes(1);
+    expect(capturedCounts).toBeDefined();
+    expect(capturedCounts.remote.persons).toBe(2);
+    expect(capturedCounts.remote.services).toBe(1);
+    expect(capturedCounts.remote.total).toBe(3);
+
+    expect(capturedCounts.local.persons).toBe(1);
+    expect(capturedCounts.local.services).toBe(1);
+    expect(capturedCounts.local.access).toBe(1);
+    expect(capturedCounts.local.logs).toBe(1);
+    expect(capturedCounts.local.total).toBe(4);
+
+    expect(restoreRes.success).toBe(false);
+    expect(restoreRes.message).toContain('dibatalkan oleh pengguna');
+    expect((await getAllPersons(db))[0].ownerName).toBe('Budi Santoso');
+  });
+
+  it('roundtrip_preserves_optional_fields - Properti opsional (limitedAt, resetAt, durationSec) terjaga utuh dalam skema (AC-4)', async () => {
+    const db = await getDatabase(getTestDbName());
+
+    await saveSettings(
+      {
+        sheetEndpoint: 'https://script.google.com/macros/s/AKfycb.../exec',
+        sheetSecret: 'SUPER_SECRET_KEY_123',
+      },
+      db
+    );
+
+    await createServiceWithValidation(
+      {
+        id: 'svc-test-opt',
+        name: 'Service Optional Test',
+        urlTemplate: 'https://example.com/',
+        usesAuthuser: false,
+        resetRule: { mode: 'pacific_midnight' },
+      },
+      db
+    );
+
+    const p = await createPerson(
+      {
+        id: 'p-opt-1',
+        ownerName: 'Ahmad Dahlan',
+        googleEmail: 'ahmad@example.com',
+        label: 'Akun Uji',
+        note: 'Catatan [1] kurung siku dan kurung kurawal {}',
+      },
+      db
+    );
+
+    const a = await createAccess(
+      {
+        id: 'access-opt-1',
+        personId: p.id,
+        serviceId: 'svc-test-opt',
+        loginMethod: 'google',
+        status: 'limited',
+        limitedAt: '2026-10-29T08:30:00.000Z',
+        resetAt: '2026-10-30T07:00:00.000Z',
+      },
+      db
+    );
+
+    await addLog(
+      {
+        id: 'log-opt-1',
+        accessId: a.id,
+        type: 'stop',
+        at: '2026-10-29T08:30:00.000Z',
+        durationSec: 360,
+        detail: 'Sesi dihentikan dengan durasi tercatat',
+      },
+      db
+    );
+
+    let transmittedSheetData: any = null;
+
+    global.fetch = vi.fn().mockImplementation(async (_url: string, options: any) => {
+      const payload = JSON.parse(options.body);
+      if (payload.action === 'backup') {
+        transmittedSheetData = payload.data;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            message: 'Backup tersimpan di Sheet.',
+            backupTimestamp: '2026-10-29T12:00:00Z',
+          }),
+        };
+      }
+      if (payload.action === 'restore') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            success: true,
+            message: 'Data dibaca dari Sheet.',
+            data: transmittedSheetData,
+          }),
+        };
+      }
+      return { ok: false, status: 400 };
+    });
+
+    // 1. Jalankan Backup
+    const backupRes = await executeSheetBackup(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      db
+    );
+    expect(backupRes.success).toBe(true);
+
+    // Verifikasi payload yang dikirim memuat properti opsional
+    expect(transmittedSheetData.access[0].limitedAt).toBe('2026-10-29T08:30:00.000Z');
+    expect(transmittedSheetData.access[0].resetAt).toBe('2026-10-30T07:00:00.000Z');
+    expect(transmittedSheetData.logs[0].durationSec).toBe(360);
+
+    // 2. Kosongkan IndexedDB lokal
+    const txClear = db.transaction(['persons', 'access', 'logs', 'services'], 'readwrite');
+    await txClear.objectStore('persons').clear();
+    await txClear.objectStore('access').clear();
+    await txClear.objectStore('logs').clear();
+    await txClear.objectStore('services').clear();
+    await txClear.done;
+
+    expect((await getAllPersons(db)).length).toBe(0);
+
+    // 3. Jalankan Restore
+    const restoreRes = await executeSheetRestore(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      { confirmOverwrite: () => true },
+      db
+    );
+    expect(restoreRes.success).toBe(true);
+
+    // 4. Verifikasi bahwa data yang dipulihkan mempertahankan seluruh properti opsional
+    const restoredAccess = await getAllAccess(db);
+    expect(restoredAccess.length).toBe(1);
+    expect(restoredAccess[0].limitedAt).toBe('2026-10-29T08:30:00.000Z');
+    expect(restoredAccess[0].resetAt).toBe('2026-10-30T07:00:00.000Z');
+
+    const restoredLogs = await getLogsByAccessId(a.id, db);
+    expect(restoredLogs.length).toBe(1);
+    expect(restoredLogs[0].durationSec).toBe(360);
+
+    const restoredPerson = (await getAllPersons(db))[0];
+    expect(restoredPerson.note).toBe('Catatan [1] kurung siku dan kurung kurawal {}');
+  });
 });
+

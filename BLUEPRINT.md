@@ -88,6 +88,11 @@ Perubahan v1.0 (TASK-012): Konfigurasi hosting statis GitHub Pages terverifikasi
   - Skrip Apps Script ditulis AI dan disalin serta di-deploy oleh pengguna; akses deploy "siapa saja dengan tautan" dilindungi kunci rahasia.
   - Risiko: pemegang URL + kunci dapat membaca/menulis sheet. Data terbatas pada email/identitas akun, label, catatan, dan log; tanpa password.
   - Perilaku CORS/redirect Apps Script dari PWA TERVERIFIKASI (TASK-010): Penggunaan `Content-Type: text/plain;charset=utf-8` dengan payload JSON pada metode `POST` melewati preflight OPTIONS browser, diterima di `e.postData.contents`, dan mengembalikan status serta latensi koneksi (probe) dengan sukses. Skrip `apps-script/Code.gs` dan klien `src/backup/sheet-probe.ts` telah diuji.
+  - Hardening Integritas Pemulihan (TASK-REV-01):
+    1. Fail-Closed Snapshot: Restore seketika dibatalkan tanpa mengubah IndexedDB bila salinan pengaman lokal gagal disimpan (kuota habis/kesalahan penyimpanan).
+    2. Proteksi Sheet Kosong: Pemulihan dari Sheet yang memiliki 0 entitas ke database lokal yang berisi entitas ditolak untuk mencegah penghapusan data akibat spreadsheet yang salah atau belum diinisialisasi.
+    3. Konfirmasi Overwrite Terinformasi: Pengguna disajikan rincian perbandingan kuantitas entitas (remote vs lokal) sebelum konfirmasi penimpaan.
+    4. Skema Kolom Tetap (`SCHEMAS`) & Format Teks Murni (`@`): Mencegah hilangnya kolom opsional (`limitedAt`, `resetAt`, `durationSec`) dan memitigasi formula injection (`=IMPORTDATA`, dll).
 * Layanan AI (AI Studio, Claude, OpenAI, DeepSeek, X): hanya tautan keluar, tanpa API.
 
 ---

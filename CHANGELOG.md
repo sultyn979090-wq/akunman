@@ -7,6 +7,12 @@ Mengikuti Keep a Changelog dan SemVer. Perubahan Level S (`[MINOR]`) dan task re
 ## [Unreleased]
 
 ### Added
+- [TASK-REV-01] Integritas Restore Google Sheets (Fail-Closed, Proteksi Sheet Kosong & Skema Tetap) (`src/backup/sheet-backup.ts`, `apps-script/Code.gs`, `src/App.tsx`, `tests/backup-sheet.test.ts`, `BLUEPRINT.md`):
+  - Fail-Closed Snapshot: Jika pembuatan salinan lokal gagal (kuota storage penuh atau error storage), proses restore dibatalkan seketika tanpa mengubah atau menghapus IndexedDB (AC-1).
+  - Proteksi Sheet Kosong: Pemulihan dari remote Sheet yang memiliki 0 entitas ke database lokal yang memiliki entitas ditolak dengan pesan peringatan jelas untuk mencegah penghapusan data lokal akibat salah endpoint/spreadsheet baru (AC-2).
+  - Dialog Konfirmasi Overwrite Terinformasi: Callback konfirmasi menerima dan menampilkan perbandingan jumlah entitas antara Google Sheet dan penyimpanan lokal (AC-3).
+  - Skema Kolom Tetap & Proteksi Formula Injection di `apps-script/Code.gs`: Menggunakan mapping `SCHEMAS` statis dan pemformatan teks murni (`@`) serta typed parsing (`JSON_COLS`, `TYPES`) untuk menjaga field opsional (`limitedAt`, `resetAt`, `durationSec`) dan mencegah eksekusi formula (AC-4).
+  - 8/8 test cases lulus di `tests/backup-sheet.test.ts` (total 52/52 test cases lulus di seluruh repositori).
 - [TASK-012] Hardening PWA, Offline & Uji Akhir (`public/sw.js`, `public/manifest.webmanifest`, `src/pwa/register-sw.ts`, `tests/pwa-offline.test.ts`, `src/App.tsx`, `BLUEPRINT.md`):
   - Service worker `sw.js` dengan strategi caching offline (cache-first untuk aset statis, network-first + cache fallback untuk navigasi HTML).
   - Web App Manifest mandiri (`display: standalone`, `start_url: ./`, ikon 192px & 512px SVG) untuk instalasi Android/Desktop.

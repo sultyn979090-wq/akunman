@@ -540,18 +540,20 @@ export default function App() {
       return;
     }
 
-    const confirmed = window.confirm(
-      'PERINGATAN: Memulihkan dari Google Sheets akan menimpa seluruh data lokal saat ini. Salinan lokal otomatis akan disimpan sebagai cadangan pengaman. Lanjutkan?'
-    );
-    if (!confirmed) return;
-
     setIsSyncingSheet(true);
     setBackupNotice(null);
     setBackupError(null);
 
     try {
       const res = await executeSheetRestore(sheetEndpointInput, sheetSecretInput, {
-        confirmOverwrite: () => true,
+        confirmOverwrite: ({ remote, local }) => {
+          return window.confirm(
+            `PERINGATAN: Memulihkan dari Google Sheets akan menimpa seluruh data lokal saat ini.\n\n` +
+            `• Data di Google Sheets: ${remote.persons} akun, ${remote.services} layanan, ${remote.access} hak akses, ${remote.logs} riwayat (${remote.total} total entitas)\n` +
+            `• Data Lokal Saat Ini: ${local.persons} akun, ${local.services} layanan, ${local.access} hak akses, ${local.logs} riwayat (${local.total} total entitas)\n\n` +
+            `Salinan lokal otomatis akan disimpan sebagai cadangan pengaman.\nApakah Anda yakin ingin menimpa data lokal?`
+          );
+        },
       });
 
       if (res.success) {

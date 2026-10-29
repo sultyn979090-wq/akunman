@@ -4,18 +4,31 @@
  * 
  * Google Apps Script Web App untuk AI Account Manager (PWA)
  * 
- * Petunjuk Deploy:
- * 1. Buka https://script.google.com/ dan buat proyek baru.
- * 2. Salin kode ini ke file Code.gs.
- * 3. Hubungkan Spreadsheet atau biarkan skrip membuat tab pada Spreadsheet aktif.
- * 4. Atur properti script atau ubah konstanta AUTH_SECRET_KEY di bawah ini.
- * 5. Klik "Deploy" -> "New deployment" -> Type: "Web app":
- *    - Execute as: Me (akun Anda)
- *    - Who has access: Anyone (Siapa saja dengan tautan)
- * 6. Salin Web App URL (berakhiran /exec) ke Pengaturan PWA.
+ * Pembaruan TASK-REV-01:
+ * 1. Skema kolom tetap (SCHEMAS) mencegah hilangnya properti opsional (resetAt, limitedAt, durationSec).
+ * 2. Pemformatan teks murni ('@') mencegah formula injection (=IMPORTDATA, dll) dan konversi angka otomatis.
+ * 3. Parser tipe eksplisit (JSON_COLS & TYPES) mencegah korupsi teks catatan bebas seperti "[1]" atau "{}".
+ * 4. Dukungan pembacaan kunci dari PropertiesService untuk keamanan deployment.
  */
 
 var AUTH_SECRET_KEY = "GANTI_DENGAN_KUNCI_RAHASIA_ANDA";
+
+var SCHEMAS = {
+  services: ['id', 'name', 'urlTemplate', 'usesAuthuser', 'resetRule', 'createdAt', 'updatedAt'],
+  persons:  ['id', 'ownerName', 'googleEmail', 'label', 'note', 'createdAt', 'updatedAt'],
+  access:   ['id', 'personId', 'serviceId', 'loginMethod', 'loginName', 'status', 'limitedAt', 'resetAt', 'activeSessionStart', 'createdAt', 'updatedAt'],
+  logs:     ['id', 'accessId', 'type', 'at', 'durationSec', 'detail'],
+  handoff:  ['id', 'serviceId', 'accessId', 'authorName', 'text', 'createdAt']
+};
+
+var JSON_COLS = {
+  services: ['resetRule']
+};
+
+var TYPES = {
+  services: { usesAuthuser: 'bool' },
+  logs: { durationSec: 'num' }
+};
 
 function doGet(e) {
   return ContentService.createTextOutput(JSON.stringify({
@@ -33,8 +46,9 @@ function doPost(e) {
     var requestData = JSON.parse(e.postData.contents);
     var providedSecret = requestData.secret || "";
 
-    // 1. Verifikasi kunci rahasia
-    if (!providedSecret || providedSecret !== AUTH_SECRET_KEY) {
+    // 1. Verifikasi kunci rahasia (prioritas script property, fallback ke konstanta)
+    var configuredSecret = PropertiesService.getScriptProperties().getProperty("AUTH_SECRET_KEY") || AUTH_SECRET_KEY;
+    if (!providedSecret || providedSecret !== configuredSecret) {
       return createJsonResponse({ 
         success: false, 
         error: "Akses ditolak: Kunci rahasia salah atau tidak disediakan." 
@@ -112,32 +126,41 @@ function writeToSheet(ss, sheetName, rows) {
   }
   sheet.clear();
 
-  if (!rows || rows.length === 0) {
+  var headers = SCHEMAS[sheetName] || (rows && rows.length > 0 ? Object.keys(rows[0]) : []);
+  if (!headers || headers.length === 0) {
     sheet.appendRow(["_empty"]);
     return;
   }
 
-  var headers = Object.keys(rows[0]);
-  sheet.appendRow(headers);
+  if (!rows || rows.length === 0) {
+    sheet.appendRow(headers);
+    return;
+  }
 
-  var dataMatrix = [];
+  var dataMatrix = [headers];
+  var jsonCols = JSON_COLS[sheetName] || [];
+
   for (var i = 0; i < rows.length; i++) {
     var rowObj = rows[i];
     var rowValues = [];
     for (var j = 0; j < headers.length; j++) {
-      var val = rowObj[headers[j]];
-      if (typeof val === "object" && val !== null) {
+      var h = headers[j];
+      var val = rowObj[h];
+      if (val === undefined || val === null) {
+        rowValues.push("");
+      } else if (jsonCols.indexOf(h) >= 0) {
         rowValues.push(JSON.stringify(val));
       } else {
-        rowValues.push(val !== undefined ? val : "");
+        rowValues.push(String(val));
       }
     }
     dataMatrix.push(rowValues);
   }
 
-  if (dataMatrix.length > 0) {
-    sheet.getRange(2, 1, dataMatrix.length, headers.length).setValues(dataMatrix);
-  }
+  // Tulis dengan proteksi format teks murni (@) untuk mencegah formula injection
+  var range = sheet.getRange(1, 1, dataMatrix.length, headers.length);
+  range.setNumberFormat('@');
+  range.setValues(dataMatrix);
 }
 
 function readFromSheet(ss, sheetName) {
@@ -145,26 +168,39 @@ function readFromSheet(ss, sheetName) {
   if (!sheet) return [];
 
   var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
-  if (lastRow < 2 || lastCol < 1) return [];
+  var headers = SCHEMAS[sheetName];
+  if (!headers) {
+    var lastCol = sheet.getLastColumn();
+    if (lastRow < 2 || lastCol < 1) return [];
+    headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  }
 
-  var headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  if (headers[0] === "_empty") return [];
+  if (lastRow < 2) return [];
 
-  var rawData = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var rawData = sheet.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
   var result = [];
+  var jsonCols = JSON_COLS[sheetName] || [];
+  var typeMap = TYPES[sheetName] || {};
 
   for (var i = 0; i < rawData.length; i++) {
     var item = {};
     for (var j = 0; j < headers.length; j++) {
       var key = headers[j];
       var rawVal = rawData[i][j];
-      if (typeof rawVal === "string" && (rawVal.startsWith("{") || rawVal.startsWith("["))) {
+      if (rawVal === "" || rawVal === undefined) {
+        continue; // abaikan kolom kosong agar nilai undefined terjaga
+      }
+
+      if (jsonCols.indexOf(key) >= 0) {
         try {
           item[key] = JSON.parse(rawVal);
         } catch (e) {
           item[key] = rawVal;
         }
+      } else if (typeMap[key] === 'bool') {
+        item[key] = (rawVal === 'true');
+      } else if (typeMap[key] === 'num') {
+        item[key] = Number(rawVal);
       } else {
         item[key] = rawVal;
       }

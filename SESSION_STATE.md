@@ -20,9 +20,9 @@ Format dibaca skrip `scripts/zlce/zlce-check.py`; jangan ubah nama field, kolom,
 * **Timestamp Audit:** 2026-10-29 jam: ?
 * **Cabang Git:** `main`
 * **Task Terakhir DONE:** `TASK-012`
-* **Task Aktif:** `-`
-* **Status Task Aktif:** -
-* **Task Berikutnya:** `-`
+* **Task Aktif:** `TASK-REV-01`
+* **Status Task Aktif:** IN_PROGRESS
+* **Task Berikutnya:** `TASK-REV-02`
 
 ---
 
@@ -42,6 +42,7 @@ Format dibaca skrip `scripts/zlce/zlce-check.py`; jangan ubah nama field, kolom,
 | `TASK-010` | Spike Apps Script (CORS & Alur) | TASK-002 | DONE | 40/40 vitest pass (sheet-probe.test), lint 0 error, build exit 0; text/plain CORS bypass, Code.gs (ping/backup/restore), probe latensi, BLUEPRINT.md bagian 4 diperbarui | ya |
 | `TASK-011` | Backup & Restore Google Sheet (Klien) | TASK-009, TASK-010 | DONE | 44/44 vitest pass, lint 0 error, build exit 0; roundtrip, auto-snapshot pre-restore, validasi skema tolak korupsi, rahasia dikecualikan | ya |
 | `TASK-012` | Hardening PWA, Offline & Uji Akhir | TASK-007, TASK-008, TASK-011 | DONE | 48/48 vitest pass (4/4 pwa-offline.test), lint 0 error, build exit 0; sw.js, manifest standalone, NFR1 < 1s terukur (~10ms), zero credential check | ya |
+| `TASK-REV-01` | Integritas Restore Sheet (Fail-Closed & Skema Tetap) | TASK-011 | IN_PROGRESS | 52/52 vitest pass (8/8 backup-sheet.test), tsc 0 error, build exit 0; fail-closed abort, empty sheet reject, count comparison, optional fields preserved | menunggu persetujuan |
 
 Bukti Verifikasi: ringkasan + lokasi bukti. `DONE` tanpa bukti dan `Disetujui: ya` tidak valid.
 
@@ -51,12 +52,17 @@ Bukti Verifikasi: ringkasan + lokasi bukti. `DONE` tanpa bukti dan `Disetujui: y
 
 Catatan tulis-dahulu: isi SEBELUM memulai langkah multi-berkas, perbarui SESUDAH langkah selesai. Kosongkan (semua `-`) saat task `DONE`.
 
-* **Task:** -
-* **Langkah Sedang Dikerjakan:** -
-* **Berkas Direncanakan/Disentuh:** -
-* **Sudah Dilakukan:** -
-* **Langkah Berikutnya (persis):** -
-* **Perintah Verifikasi:** -
+* **Task:** `TASK-REV-01`
+* **Langkah Sedang Dikerjakan:** Verifikasi menyeluruh implementasi fail-closed, proteksi sheet kosong, konfirmasi jumlah entitas, dan skema tetap Code.gs
+* **Berkas Direncanakan/Disentuh:** `src/backup/sheet-backup.ts`, `apps-script/Code.gs`, `src/App.tsx`, `tests/backup-sheet.test.ts`
+* **Sudah Dilakukan:** 
+  1. Implementasi fail-closed snapshot: restore batal jika pembuatan salinan gagal tanpa menyentuh IndexedDB (AC-1).
+  2. Implementasi proteksi sheet kosong: tolak pemulihan jika Sheet remote berisi 0 entitas sedangkan lokal > 0 entitas (AC-2).
+  3. Dialog konfirmasi pemulihan memaparkan perbandingan rinci entitas remote vs lokal (AC-3).
+  4. Skema tetap `SCHEMAS`, format teks `@`, dan parser tipe eksplisit di `apps-script/Code.gs` menjaga properti opsional `resetAt`, `limitedAt`, `durationSec` (AC-4).
+  5. 8/8 tests di `tests/backup-sheet.test.ts` lulus; total 52/52 tests lulus (16 files); `tsc --noEmit` 0 error; build produksi berhasil.
+* **Langkah Berikutnya (persis):** Menunggu persetujuan pengguna untuk menetapkan status `DONE` pada `TASK-REV-01`, lalu mengosongkan WAL dan mengambil `TASK-REV-02`.
+* **Perintah Verifikasi:** `npm test && npm run lint && npm run build`
 * **Diperbarui:** 2026-10-29 jam: ?
 
 ---
@@ -83,23 +89,25 @@ Status: `OPEN | CONFIRMED | REJECTED | ANSWERED`. Jika ragu, catat di sini dan t
 
 | ID | Level (S/M/L) | Deskripsi | Tindakan |
 | :--- | :--- | :--- | :--- |
-| (kosong) | | | |
+| `TASK-REV-01` | Level L | Integritas Restore Sheet (Fail-Closed, Sheet Kosong & Skema Tetap) | Selesai diimplementasikan, menunggu persetujuan DONE pengguna |
 
 ---
 
 ## 6. CATATAN SERAH TERIMA (ditimpa; maks. ~10 baris)
 
-* [2026-10-29] SELURUH BACKLOG (TASK-001 s/d TASK-012) TELAH SELESAI PENUH (v1.0).
-* [2026-10-29] 48 unit tests lolos (16 test files) via Vitest (`npm test`). Linter `npm run lint` 0 error; build produksi exit 0.
-* [2026-10-29] PWA offline hardening terverifikasi: Service Worker sw.js, manifest standalone, tombol install, indikator offline.
-* [2026-10-29] Integrasi Google Sheets dua arah mandiri via Apps Script tanpa ketergantungan Firebase.
-* [2026-10-29] Seluruh Aturan Bisnis (BR-01 s/d BR-15) dan NFR 1 (< 1s) terpenuhi dengan bukti lengkap.
-* [2026-10-29] Proyek siap digunakan dalam lingkungan produksi dan terpasang sebagai PWA Android/Desktop.
+* [2026-10-29] TASK-REV-01 selesai diimplementasikan dengan 52/52 tests lulus (16 test files).
+* [2026-10-29] AC-1 Fail-Closed: Restore otomatis batal tanpa menyentuh IndexedDB jika pembuatan salinan lokal gagal.
+* [2026-10-29] AC-2 Proteksi Sheet Kosong: Pemulihan dari Sheet kosong ke DB lokal berisi ditolak dengan pesan jelas.
+* [2026-10-29] AC-3 Konfirmasi Overwrite: Memaparkan perbandingan jumlah entitas remote vs lokal.
+* [2026-10-29] AC-4 apps-script/Code.gs: Memakai SCHEMAS tetap, pemformatan teks '@' (mencegah formula injection), dan mempertahankan resetAt, limitedAt, durationSec.
+* [2026-10-29] Menunggu persetujuan pengguna untuk menetapkan TASK-REV-01 DONE.
 
 ---
 
 ## 7. LOG AUDIT (terbaru di atas; arsipkan entri lama ke `docs/archive/`)
 
+* [2026-10-29 jam: ?] TASK-REV-01 implementasi & verifikasi selesai (52 tests lulus, tsc 0 error, build exit 0). Menunggu persetujuan DONE pengguna.
+* [2026-10-29 jam: ?] TASK-REV-01 didaftarkan dan IN_PROGRESS. WAL diisi.
 * [2026-10-29 jam: ?] TASK-012 DONE (disetujui pengguna). WAL dikosongkan. SIKLUS BACKLOG SELESAI 100% (v1.0).
 * [2026-10-29 jam: ?] TASK-011 DONE (disetujui pengguna). TASK-012 diimplementasikan & 48/48 tests lulus. Menunggu persetujuan DONE akhir TASK-012.
 * [2026-10-29 jam: ?] TASK-011 diimplementasikan & 44/44 tests lulus (4/4 backup-sheet.test). Menunggu persetujuan DONE pengguna.

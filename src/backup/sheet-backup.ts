@@ -19,8 +19,51 @@ import {
 
 export const PRE_RESTORE_STORAGE_KEY = 'ai_account_manager_pre_restore_snapshot';
 
+export interface EntityCounts {
+  services: number;
+  persons: number;
+  access: number;
+  logs: number;
+  handoffNotes: number;
+  total: number;
+}
+
+export function countEntities(data: {
+  services?: any[];
+  persons?: any[];
+  access?: any[];
+  logs?: any[];
+  handoffNotes?: any[];
+}): EntityCounts {
+  const services = Array.isArray(data?.services) ? data.services.length : 0;
+  const persons = Array.isArray(data?.persons) ? data.persons.length : 0;
+  const access = Array.isArray(data?.access) ? data.access.length : 0;
+  const logs = Array.isArray(data?.logs) ? data.logs.length : 0;
+  const handoffNotes = Array.isArray(data?.handoffNotes) ? data.handoffNotes.length : 0;
+  return {
+    services,
+    persons,
+    access,
+    logs,
+    handoffNotes,
+    total: services + persons + access + logs + handoffNotes,
+  };
+}
+
+class InMemoryStorage implements Storage {
+  private data = new Map<string, string>();
+  get length() { return this.data.size; }
+  clear() { this.data.clear(); }
+  getItem(key: string) { return this.data.get(key) ?? null; }
+  key(index: number) { return Array.from(this.data.keys())[index] ?? null; }
+  removeItem(key: string) { this.data.delete(key); }
+  setItem(key: string, value: string) { this.data.set(key, value); }
+}
+
+const memoryStorageFallback = new InMemoryStorage();
+
 export interface ExecuteSheetRestoreOptions {
-  confirmOverwrite?: () => boolean | Promise<boolean>;
+  confirmOverwrite?: (counts: { remote: EntityCounts; local: EntityCounts }) => boolean | Promise<boolean>;
   onPreRestoreBackup?: (backupJson: string) => void | Promise<void>;
   storage?: Storage;
 }
@@ -78,11 +121,13 @@ export async function executeSheetBackup(
 
 /**
  * Eksekusi Restore dari Google Sheets (Sheet -> PWA):
- * - Meminta konfirmasi (jika disediakan callback confirmOverwrite).
- * - Menghubungi Apps Script untuk membaca data.
- * - Memvalidasi format & integritas data Sheet: jika rusak/salah skema, DITOLAK tanpa mengubah data lokal (AC-3).
- * - Sebelum menimpa data, OTOMATIS membuat salinan JSON lokal (AC-2, BR-12) dan menyimpannya.
- * - Menimpa IndexedDB lokal dan mempertahankan kredensial endpoint/secret lokal (AC-1, BR-13).
+ * - Mengambil data Sheet terlebih dahulu dari Apps Script Web App.
+ * - Memvalidasi format & integritas skema (jika salah skema, DITOLAK tanpa ubah data lokal).
+ * - Menghitung perbandingan entitas (remote vs local).
+ * - Proteksi Sheet Kosong (AC-2): jika remote 0 entitas dan lokal > 0, DITOLAK.
+ * - Konfirmasi pengguna dengan informasi perbandingan jumlah entitas (AC-3).
+ * - Fail-Closed Snapshot (AC-1): salinan lokal WAJIB tersimpan sebelum menimpa. Jika gagal, abort.
+ * - Menimpa IndexedDB lokal dan mempertahankan kredensial lokal (AC-1, BR-13).
  */
 export async function executeSheetRestore(
   endpoint: string,
@@ -100,18 +145,7 @@ export async function executeSheetRestore(
     };
   }
 
-  // 1. Konfirmasi sebelum melanjutkan
-  if (options?.confirmOverwrite) {
-    const isConfirmed = await options.confirmOverwrite();
-    if (!isConfirmed) {
-      return {
-        success: false,
-        message: 'Pemulihan data dibatalkan oleh pengguna.',
-      };
-    }
-  }
-
-  // 2. Ambil data dari Apps Script Web App
+  // 1. Ambil data dari Apps Script Web App
   const sheetResult: SheetRestoreResult = await restoreFromSheet(
     cleanEndpoint,
     cleanSecret
@@ -124,7 +158,7 @@ export async function executeSheetRestore(
     };
   }
 
-  // 3. Validasi ketat integritas skema data Sheet (AC-3)
+  // 2. Validasi ketat integritas skema data Sheet (AC-3)
   const syntheticPayload = {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -141,15 +175,54 @@ export async function executeSheetRestore(
     };
   }
 
-  // 4. Buat salinan lokal otomatis SEBELUM menimpa data lokal (AC-2, BR-12)
+  // 3. Baca data lokal untuk menghitung perbandingan entitas & persiapan snapshot
+  let localJsonString: string;
+  try {
+    localJsonString = await exportLocalJsonData(dbInstance);
+  } catch (exportErr) {
+    return {
+      success: false,
+      message: `Restore dibatalkan: gagal membaca data lokal (${exportErr instanceof Error ? exportErr.message : String(exportErr)}). Data lokal tidak diubah.`,
+    };
+  }
+
+  const localParsed = JSON.parse(localJsonString);
+  const localCounts = countEntities(localParsed.data || {});
+  const remoteCounts = countEntities(sheetResult.data);
+
+  // 4. Proteksi Sheet Kosong (AC-2)
+  if (remoteCounts.total === 0 && localCounts.total > 0) {
+    return {
+      success: false,
+      message: `Restore dibatalkan: Sheet kosong (0 entitas) sedangkan data lokal berisi ${localCounts.total} entitas. Data lokal tidak diubah.`,
+    };
+  }
+
+  // 5. Konfirmasi sebelum melanjutkan dengan perbandingan jumlah data (AC-3)
+  if (options?.confirmOverwrite) {
+    const isConfirmed = await options.confirmOverwrite({
+      remote: remoteCounts,
+      local: localCounts,
+    });
+    if (!isConfirmed) {
+      return {
+        success: false,
+        message: 'Pemulihan data dibatalkan oleh pengguna.',
+      };
+    }
+  }
+
+  // 6. Fail-Closed Salinan Lokal Otomatis SEBELUM menimpa data lokal (AC-1, BR-12)
   let snapshotSaved = false;
   try {
-    const preRestoreSnapshot = await exportLocalJsonData(dbInstance);
+    const store =
+      options?.storage ||
+      (typeof window !== 'undefined' && window.localStorage
+        ? window.localStorage
+        : memoryStorageFallback);
 
-    // Simpan ke storage (localStorage)
-    const store = options?.storage || (typeof window !== 'undefined' ? window.localStorage : undefined);
     if (store) {
-      store.setItem(PRE_RESTORE_STORAGE_KEY, preRestoreSnapshot);
+      store.setItem(PRE_RESTORE_STORAGE_KEY, localJsonString);
       store.setItem(
         `${PRE_RESTORE_STORAGE_KEY}_timestamp`,
         new Date().toISOString()
@@ -157,16 +230,24 @@ export async function executeSheetRestore(
       snapshotSaved = true;
     }
 
-    // Panggil hook eksternal jika ada (mis. untuk trigger download cadangan)
     if (options?.onPreRestoreBackup) {
-      await options.onPreRestoreBackup(preRestoreSnapshot);
+      await options.onPreRestoreBackup(localJsonString);
       snapshotSaved = true;
     }
   } catch (snapshotErr) {
-    console.warn('Gagal membuat auto-snapshot pre-restore:', snapshotErr);
+    snapshotSaved = false;
   }
 
-  // 5. Impor data ke penyimpanan lokal IndexedDB (AC-1)
+  // AC-1 Fail-Closed: Jika snapshot gagal dibuat (misal storage quota full), batalkan pemulihan
+  if (!snapshotSaved) {
+    return {
+      success: false,
+      message: 'Restore dibatalkan: salinan pengaman gagal dibuat. Data lokal tidak diubah.',
+      snapshotCreated: false,
+    };
+  }
+
+  // 7. Impor data ke penyimpanan lokal IndexedDB
   try {
     await importLocalJsonData(JSON.stringify(syntheticPayload), dbInstance);
 

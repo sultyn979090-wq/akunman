@@ -219,3 +219,21 @@ MODE LITE: `Docs Impact` hanya merujuk `BLUEPRINT` / `TASKS`; `Test Case` meruju
   5. Checklist rilis tanpa penyimpanan password/token terpenuhi.
 * **Test Case:** `e2e.manual::install_and_offline`, `e2e.manual::full_switch_flow`
 * **Metode Verifikasi:** uji manual di Android + output build; tempel bukti.
+
+---
+
+### TASK-REV-01: Integritas Restore Google Sheets (Fail-Closed, Proteksi Sheet Kosong & Skema Tetap)
+* **Fase:** FASE REVISI (Hardening v1.1)
+* **Deskripsi:** Mengubah alur restore menjadi fail-closed bila snapshot gagal, menolak restore dari Sheet kosong yang dapat menghapus data lokal, dan menerapkan skema kolom tetap di Code.gs untuk mencegah hilangnya data status limit dan durasi sesi.
+* **Dependensi:** `TASK-011`
+* **File:** `src/backup/sheet-backup.ts`, `apps-script/Code.gs`, `src/App.tsx`, `tests/backup-sheet.test.ts`
+* **Docs Terkait (Tier 1):** `BLUEPRINT.md` (BR-12, BR-13, bagian 4, 8)
+* **Docs Impact:** `BLUEPRINT` (bagian 4), `CHANGELOG`
+* **Acceptance Criteria:**
+  1. Jika pembuatan snapshot pra-restore gagal, operasi restore seketika dibatalkan (fail-closed); data lokal tidak disentuh.
+  2. Jika Sheet mengembalikan data kosong (0 entitas) sementara data lokal memiliki entitas, restore ditolak untuk mencegah penghapusan data lokal akibat salah endpoint/sheet baru.
+  3. Dialog konfirmasi restore menyajikan informasi perbandingan jumlah entitas remote vs lokal.
+  4. Skrip Apps Script `Code.gs` menggunakan skema kolom tetap (`SCHEMAS`) dan pemformatan teks murni (`@`) untuk mencegah formula injection dan memastikan seluruh kolom opsional (`limitedAt`, `resetAt`, `durationSec`) ikut tersimpan dan terbaca kembali.
+* **Test Case:** `backup-sheet.test::restore_aborts_when_snapshot_fails`, `backup-sheet.test::restore_empty_sheet_rejected`, `backup-sheet.test::restore_confirmation_with_counts`, `backup-sheet.test::roundtrip_preserves_optional_fields`
+* **Metode Verifikasi:** Vitest test runner + pengujian kasus gagal; tempel output.
+
