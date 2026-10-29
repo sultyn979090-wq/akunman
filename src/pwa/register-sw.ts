@@ -58,8 +58,7 @@ export function registerServiceWorker(): void {
   });
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      // Menggunakan path relatif terhadap base
+    const register = () => {
       const swUrl = './sw.js';
       navigator.serviceWorker
         .register(swUrl)
@@ -69,6 +68,13 @@ export function registerServiceWorker(): void {
         .catch((err) => {
           console.warn('Registrasi Service Worker gagal:', err);
         });
-    });
+    };
+
+    if (document.readyState === 'complete') {
+      register();
+    } else {
+      window.addEventListener('load', register);
+    }
   }
 }
+

@@ -19,10 +19,10 @@ Format dibaca skrip `scripts/zlce/zlce-check.py`; jangan ubah nama field, kolom,
 
 * **Timestamp Audit:** 2026-10-29 jam: ?
 * **Cabang Git:** `main`
-* **Task Terakhir DONE:** `TASK-012`
-* **Task Aktif:** `TASK-REV-01`
+* **Task Terakhir DONE:** `TASK-REV-02`
+* **Task Aktif:** `TASK-REV-03`
 * **Status Task Aktif:** IN_PROGRESS
-* **Task Berikutnya:** `TASK-REV-02`
+* **Task Berikutnya:** -
 
 ---
 
@@ -42,7 +42,9 @@ Format dibaca skrip `scripts/zlce/zlce-check.py`; jangan ubah nama field, kolom,
 | `TASK-010` | Spike Apps Script (CORS & Alur) | TASK-002 | DONE | 40/40 vitest pass (sheet-probe.test), lint 0 error, build exit 0; text/plain CORS bypass, Code.gs (ping/backup/restore), probe latensi, BLUEPRINT.md bagian 4 diperbarui | ya |
 | `TASK-011` | Backup & Restore Google Sheet (Klien) | TASK-009, TASK-010 | DONE | 44/44 vitest pass, lint 0 error, build exit 0; roundtrip, auto-snapshot pre-restore, validasi skema tolak korupsi, rahasia dikecualikan | ya |
 | `TASK-012` | Hardening PWA, Offline & Uji Akhir | TASK-007, TASK-008, TASK-011 | DONE | 48/48 vitest pass (4/4 pwa-offline.test), lint 0 error, build exit 0; sw.js, manifest standalone, NFR1 < 1s terukur (~10ms), zero credential check | ya |
-| `TASK-REV-01` | Integritas Restore Sheet (Fail-Closed & Skema Tetap) | TASK-011 | IN_PROGRESS | 52/52 vitest pass (8/8 backup-sheet.test), tsc 0 error, build exit 0; fail-closed abort, empty sheet reject, count comparison, optional fields preserved | menunggu persetujuan |
+| `TASK-REV-01` | Integritas Restore Sheet (Fail-Closed & Skema Tetap) | TASK-011 | DONE | 52/52 vitest pass (8/8 backup-sheet.test), tsc 0 error, build exit 0; fail-closed abort, empty sheet reject, count comparison, optional fields preserved | ya |
+| `TASK-REV-02` | Keandalan Offline Service Worker & Precache Build | TASK-012 | DONE | 57/57 vitest pass (9/9 pwa-offline.test), tsc 0 error, build exit 0; asset-manifest.json generated, await navigation fallback, cache-first runtime | ya |
+| `TASK-REV-03` | Validasi Semantik Impor & Integritas Relasional | TASK-REV-01, TASK-REV-02 | IN_PROGRESS | sedang diimplementasikan | menunggu bukti + persetujuan |
 
 Bukti Verifikasi: ringkasan + lokasi bukti. `DONE` tanpa bukti dan `Disetujui: ya` tidak valid.
 
@@ -52,18 +54,15 @@ Bukti Verifikasi: ringkasan + lokasi bukti. `DONE` tanpa bukti dan `Disetujui: y
 
 Catatan tulis-dahulu: isi SEBELUM memulai langkah multi-berkas, perbarui SESUDAH langkah selesai. Kosongkan (semua `-`) saat task `DONE`.
 
-* **Task:** `TASK-REV-01`
-* **Langkah Sedang Dikerjakan:** Verifikasi menyeluruh implementasi fail-closed, proteksi sheet kosong, konfirmasi jumlah entitas, dan skema tetap Code.gs
-* **Berkas Direncanakan/Disentuh:** `src/backup/sheet-backup.ts`, `apps-script/Code.gs`, `src/App.tsx`, `tests/backup-sheet.test.ts`
+* **Task:** `TASK-REV-03`
+* **Langkah Sedang Dikerjakan:** Memperketat `validateImportPayload` dan `importLocalJsonData` dengan validasi semantik entitas, penegakan integritas referensial (foreign keys), pencegahan override `maxPersons`, proteksi `localeCompare` timestamp `UsageLog.at`, dan snapshot pra-impor JSON.
+* **Berkas Direncanakan/Disentuh:** `src/backup/json-backup.ts`, `src/backup/sheet-backup.ts`, `tests/backup-json.test.ts`, `tests/backup-sheet.test.ts`, `BLUEPRINT.md`, `CHANGELOG.md`
 * **Sudah Dilakukan:** 
-  1. Implementasi fail-closed snapshot: restore batal jika pembuatan salinan gagal tanpa menyentuh IndexedDB (AC-1).
-  2. Implementasi proteksi sheet kosong: tolak pemulihan jika Sheet remote berisi 0 entitas sedangkan lokal > 0 entitas (AC-2).
-  3. Dialog konfirmasi pemulihan memaparkan perbandingan rinci entitas remote vs lokal (AC-3).
-  4. Skema tetap `SCHEMAS`, format teks `@`, dan parser tipe eksplisit di `apps-script/Code.gs` menjaga properti opsional `resetAt`, `limitedAt`, `durationSec` (AC-4).
-  5. 8/8 tests di `tests/backup-sheet.test.ts` lulus; total 52/52 tests lulus (16 files); `tsc --noEmit` 0 error; build produksi berhasil.
-* **Langkah Berikutnya (persis):** Menunggu persetujuan pengguna untuk menetapkan status `DONE` pada `TASK-REV-01`, lalu mengosongkan WAL dan mengambil `TASK-REV-02`.
+  1. Definisi task, AC, dan test cases `TASK-REV-03` didaftarkan di `TASKS.md` dan `SESSION_STATE.md`.
+* **Langkah Berikutnya (persis):** Menulis fungsi validasi semantik mendalam di `src/backup/json-backup.ts`, menambahkan snapshot pra-impor, memperbarui test suite `tests/backup-json.test.ts` dan `tests/backup-sheet.test.ts`, dan memverifikasi dengan Vitest serta compiler TypeScript.
 * **Perintah Verifikasi:** `npm test && npm run lint && npm run build`
 * **Diperbarui:** 2026-10-29 jam: ?
+
 
 ---
 
@@ -89,23 +88,24 @@ Status: `OPEN | CONFIRMED | REJECTED | ANSWERED`. Jika ragu, catat di sini dan t
 
 | ID | Level (S/M/L) | Deskripsi | Tindakan |
 | :--- | :--- | :--- | :--- |
-| `TASK-REV-01` | Level L | Integritas Restore Sheet (Fail-Closed, Sheet Kosong & Skema Tetap) | Selesai diimplementasikan, menunggu persetujuan DONE pengguna |
+| `TASK-REV-01` | Level L | Integritas Restore Sheet (Fail-Closed, Sheet Kosong & Skema Tetap) | DONE (disetujui pengguna) |
+| `TASK-REV-02` | Level M | Keandalan Offline Service Worker & Precache Build Vite | DONE (disetujui pengguna) |
+| `TASK-REV-03` | Level M | Validasi Semantik Impor & Integritas Relasional (JSON & Sheet) | IN_PROGRESS (sedang diimplementasikan) |
 
 ---
 
 ## 6. CATATAN SERAH TERIMA (ditimpa; maks. ~10 baris)
 
-* [2026-10-29] TASK-REV-01 selesai diimplementasikan dengan 52/52 tests lulus (16 test files).
-* [2026-10-29] AC-1 Fail-Closed: Restore otomatis batal tanpa menyentuh IndexedDB jika pembuatan salinan lokal gagal.
-* [2026-10-29] AC-2 Proteksi Sheet Kosong: Pemulihan dari Sheet kosong ke DB lokal berisi ditolak dengan pesan jelas.
-* [2026-10-29] AC-3 Konfirmasi Overwrite: Memaparkan perbandingan jumlah entitas remote vs lokal.
-* [2026-10-29] AC-4 apps-script/Code.gs: Memakai SCHEMAS tetap, pemformatan teks '@' (mencegah formula injection), dan mempertahankan resetAt, limitedAt, durationSec.
-* [2026-10-29] Menunggu persetujuan pengguna untuk menetapkan TASK-REV-01 DONE.
+* [2026-10-29] TASK-REV-02 disetujui DONE oleh pengguna.
+* [2026-10-29] TASK-REV-03 aktif (IN_PROGRESS): Validasi Semantik Impor & Integritas Relasional (JSON & Sheet).
+* [2026-10-29] Target: Penolakan versi skema selain v1, proteksi penimpaan maxPersons, foreign key validation (access->person/service, log->access, handoff->service), validasi tipe ISO pada UsageLog.at (anti-crash localeCompare), dan snapshot pre-import.
 
 ---
 
 ## 7. LOG AUDIT (terbaru di atas; arsipkan entri lama ke `docs/archive/`)
 
+* [2026-10-29 jam: ?] TASK-REV-02 disetujui DONE oleh pengguna. TASK-REV-03 didaftarkan dan IN_PROGRESS. WAL diisi.
+* [2026-10-29 jam: ?] TASK-REV-02 implementasi & verifikasi selesai (57 tests lulus, tsc 0 error, build exit 0). Menunggu persetujuan DONE pengguna.
 * [2026-10-29 jam: ?] TASK-REV-01 implementasi & verifikasi selesai (52 tests lulus, tsc 0 error, build exit 0). Menunggu persetujuan DONE pengguna.
 * [2026-10-29 jam: ?] TASK-REV-01 didaftarkan dan IN_PROGRESS. WAL diisi.
 * [2026-10-29 jam: ?] TASK-012 DONE (disetujui pengguna). WAL dikosongkan. SIKLUS BACKLOG SELESAI 100% (v1.0).
@@ -118,3 +118,4 @@ Status: `OPEN | CONFIRMED | REJECTED | ANSWERED`. Jika ragu, catat di sini dan t
 * [2026-10-29 jam: ?] TASK-003 DONE. 7 tests lulus.
 * [2026-10-29 jam: ?] TASK-002 DONE. 4 tests lulus.
 * [2026-10-29 jam: ?] TASK-001 DONE. Proyek di-scaffold.
+

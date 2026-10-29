@@ -641,5 +641,65 @@ describe('backup-sheet.test', () => {
     const restoredPerson = (await getAllPersons(db))[0];
     expect(restoredPerson.note).toBe('Catatan [1] kurung siku dan kurung kurawal {}');
   });
+
+  it('corrupt_relational_sheet_rejected - Restore Sheet dengan data relasional rusak (Access yatim / Log tanpa string ISO) ditolak aman tanpa ubah data lokal', async () => {
+    const db = await getDatabase(getTestDbName());
+    await seedTestData(db); // Ada akun Budi Santoso
+
+    // Simulasi data dari Google Sheets yang cacat relasional (Access merujuk Person tidak ada)
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        data: {
+          services: [
+            {
+              id: 'svc-1',
+              name: 'Valid Service',
+              urlTemplate: 'https://example.com/',
+              usesAuthuser: false,
+              resetRule: { mode: 'manual' },
+            },
+          ],
+          persons: [
+            {
+              id: 'person-valid',
+              ownerName: 'Orang Sah',
+              googleEmail: 'sah@example.com',
+            },
+          ],
+          access: [
+            {
+              id: 'acc-corrupt',
+              personId: 'person-GHOST-ID', // Person tidak terdaftar!
+              serviceId: 'svc-1',
+              status: 'ready',
+            },
+          ],
+          logs: [],
+          handoffNotes: [],
+          settings: { id: 'default', resetTimezone: 'America/Los_Angeles', maxPersons: 10 },
+        },
+      }),
+    } as any);
+
+    const restoreRes = await executeSheetRestore(
+      'https://script.google.com/macros/s/AKfycb.../exec',
+      'SUPER_SECRET_KEY_123',
+      { confirmOverwrite: () => true },
+      db
+    );
+
+    expect(restoreRes.success).toBe(false);
+    expect(restoreRes.message).toContain('Data Sheet tidak valid atau rusak');
+    expect(restoreRes.message).toContain('Integritas relasional rusak');
+
+    // Data lokal tetap aman tidak terhapus
+    const personsAfter = await getAllPersons(db);
+    expect(personsAfter.length).toBe(1);
+    expect(personsAfter[0].ownerName).toBe('Budi Santoso');
+  });
 });
+
 

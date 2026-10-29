@@ -2,12 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  * 
- * Service Worker untuk AI Account Manager PWA (TASK-012)
+ * Service Worker untuk AI Account Manager PWA (TASK-012, TASK-REV-02)
  * Menyediakan cache-first / stale-while-revalidate untuk aset aplikasi statis
- * agar aplikasi dapat berjalan sepenuhnya dalam mode pesawat / offline.
+ * dan fallback navigasi ter-await untuk mode pesawat / offline.
  */
 
-const CACHE_NAME = 'ai-account-manager-v1';
+const CACHE_NAME = 'ai-account-manager-v2';
 
 const STATIC_ASSETS = [
   './',
@@ -19,10 +19,26 @@ const STATIC_ASSETS = [
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS).catch((err) => {
-        console.warn('Gagal cache beberapa aset awal:', err);
-      });
+    caches.open(CACHE_NAME).then(async (cache) => {
+      // 1. Precache shell dasar
+      try {
+        await cache.addAll(STATIC_ASSETS);
+      } catch (err) {
+        console.warn('Gagal cache beberapa aset dasar:', err);
+      }
+
+      // 2. Precache bundel build Vite dari asset-manifest.json jika tersedia
+      try {
+        const manifestRes = await fetch('./asset-manifest.json');
+        if (manifestRes && manifestRes.ok) {
+          const manifestAssets = await manifestRes.json();
+          if (Array.isArray(manifestAssets)) {
+            await cache.addAll(manifestAssets);
+          }
+        }
+      } catch {
+        // Lingkungan dev atau jika manifest belum dibuat; lewati tanpa memblokir install
+      }
     }).then(() => self.skipWaiting())
   );
 });
@@ -44,18 +60,17 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Jangan cache permintaan POST/PUT/DELETE atau permintaan eksternal (Google Apps Script / link AI)
+  // Jangan cache permintaan POST/PUT/DELETE
   if (event.request.method !== 'GET') {
     return;
   }
 
-  // Lewati permintaan Google Apps Script dan layanan eksternal
+  // Lewati mutlak permintaan ke origin luar (Google Apps Script, AI links, external CDNs)
   if (url.origin !== self.location.origin) {
     return;
   }
 
-  // Network-first dengan cache fallback untuk dokumen navigasi HTML,
-  // Cache-first untuk aset statis (js, css, svg, webmanifest)
+  // Network-first dengan cache fallback untuk dokumen navigasi HTML (SPA routing)
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
@@ -67,31 +82,53 @@ self.addEventListener('fetch', (event) => {
           return response;
         })
         .catch(async () => {
-          const cached = await caches.match(event.request);
-          if (cached) return cached;
-          return caches.match('./index.html') || caches.match('/');
+          // Evaluasi fallback secara berurutan dan ter-await (bukan Promise-truthy)
+          const cachedDirect = await caches.match(event.request);
+          if (cachedDirect) return cachedDirect;
+
+          const fallbackHtml = await caches.match('./index.html');
+          if (fallbackHtml) return fallbackHtml;
+
+          const fallbackDotSlash = await caches.match('./');
+          if (fallbackDotSlash) return fallbackDotSlash;
+
+          const fallbackSlash = await caches.match('/');
+          if (fallbackSlash) return fallbackSlash;
+
+          return new Response('Aplikasi sedang offline dan berkas shell belum tersedia di cache.', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+          });
         })
     );
     return;
   }
 
-  // Cache-first atau Stale-While-Revalidate untuk script, style, image
+  // Cache-first dengan runtime caching & background revalidation untuk aset statis lokal
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
+      if (cachedResponse) {
+        // Revalidasi di latar belakang bila online (stale-while-revalidate)
+        fetch(event.request).then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const clone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          }
+        }).catch(() => {
+          // Diamkan galat saat offline
+        });
+        return cachedResponse;
+      }
+
+      // Bila belum ada di cache, ambil dari jaringan dan simpan ke cache
+      return fetch(event.request).then((networkResponse) => {
         if (networkResponse && networkResponse.status === 200) {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
+          const clone = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return networkResponse;
-      }).catch(() => {
-        // Mode offline: jika tidak ada di cache dan fetch gagal, kembalikan cachedResponse bila ada
-        return cachedResponse;
       });
-
-      return cachedResponse || fetchPromise;
     })
   );
 });
+

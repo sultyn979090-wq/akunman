@@ -101,6 +101,11 @@ Perubahan v1.0 (TASK-012): Konfigurasi hosting statis GitHub Pages terverifikasi
 
 1. Performa: daftar akun tampil < 1 dtk pada Android menengah (target, diukur di TASK-012).
 2. Ketersediaan: fitur inti berjalan offline (kecuali backup/restore Sheet dan membuka layanan).
+   - **Hardening Offline & Service Worker (TASK-REV-02):**
+     - Fallback navigasi SPA pada `sw.js` mengevaluasi cache secara ter-`await` (`request` -> `./index.html` -> `./` -> `/`), meniadakan cacat evaluasi logika Promise-truthy.
+     - Plugin `pwa-asset-manifest` pada konfigurasi Vite menghasilkan `dist/asset-manifest.json` yang secara otomatis di-precache oleh `sw.js` saat event `install`, menjamin seluruh bundel JS/CSS Vite ter-cache sebelum beralih ke mode pesawat.
+     - Caching aset statis lokal menerapkan cache-first dengan runtime caching cadangan dan background stale-while-revalidate.
+     - Permintaan ke origin eksternal (Google Apps Script, tautan AI eksternal) dan method non-GET sepenuhnya di-bypass tanpa intervensi Service Worker.
 3. Auditability: setiap log memuat timestamp ISO 8601 dari jam perangkat, akses terkait, jenis kejadian.
 
 ---
@@ -148,8 +153,12 @@ Dikelola di `SESSION_STATE.md` bagian 4. Ringkasan: Q-01, ASM-02, ASM-03, ASM-04
   - pergantian DST zona Pasifik; jam perangkat diubah; akun ke-11 ditolak
   - `ownerName`/`googleEmail` ganda ditolak
   - `resetAt` manual di masa lalu ditolak; reload saat `limited` tetap `limited` sampai waktunya lewat
-  - impor JSON rusak ditolak tanpa mengubah data
-  - restore: konfirmasi wajib, salinan lokal dibuat sebelum menimpa, data Sheet rusak ditolak
+  - impor JSON rusak/skema salah ditolak tanpa mengubah data
+  - integritas relasional impor & restore (foreign key: Access->Person/Service, UsageLog->Access, HandoffNote->Service) ditolak bila ada entitas yatim
+  - penolakan versi impor di luar v1, isolasi kebijakan `maxPersons` lokal terhadap override data impor
+  - validasi timestamp `UsageLog.at` wajib bertipe ISO 8601 string (mencegah runtime crash `localeCompare`)
+  - restore: konfirmasi wajib, salinan lokal dibuat sebelum menimpa (fail-closed), data Sheet rusak/kosong ditolak
   - endpoint salah/offline/kunci salah: pesan error jelas, data lokal tidak berubah
-  - mode offline; URL tanpa skema http(s) ditolak
+  - mode offline & SW precache bundel Vite; URL tanpa skema http(s) ditolak
 * **Kriteria lulus:** semua AC task terpenuhi dengan bukti; ekspor -> hapus -> impor menghasilkan data identik.
+

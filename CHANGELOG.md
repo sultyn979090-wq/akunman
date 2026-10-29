@@ -7,6 +7,20 @@ Mengikuti Keep a Changelog dan SemVer. Perubahan Level S (`[MINOR]`) dan task re
 ## [Unreleased]
 
 ### Added
+- [TASK-REV-03] Validasi Semantik Impor & Integritas Relasional (JSON & Sheet) (`src/backup/json-backup.ts`, `src/backup/sheet-backup.ts`, `tests/backup-json.test.ts`, `tests/backup-sheet.test.ts`, `BLUEPRINT.md`):
+  - Penolakan Versi Skema Asing: Menolak versi skema selain versi 1 secara eksplisit untuk mencegah korupsi versi masa depan/tidak kompatibel (AC-1).
+  - Isolasi Kebijakan Batas Akun Lokal: Menegakkan batas maksimal 10 akun (BR-07, ASM-02) dan mengisolasi pengaturan `maxPersons` lokal agar tidak dapat di-override atau dibypass oleh berkas impor/remote (AC-2, penutupan F-05 Claude / F-04 ChatGPT).
+  - Integritas Relasional Penuh (Foreign Key): Menolak payload jika `Access` merujuk `personId` atau `serviceId` yang tidak terdaftar, jika `UsageLog` merujuk `accessId` yang tidak terdaftar, atau jika `HandoffNote` merujuk `serviceId` yang tidak terdaftar (AC-3).
+  - Validasi Semantik Tipe & Anti-Crash Riwayat: Memastikan timestamp `UsageLog.at` wajib berupa string ISO 8601 yang valid (membasmi tuntas bug `localeCompare is not a function`), status `Access` limited wajib memiliki `resetAt` bertipe ISO string, URL template `Service` wajib http(s) valid, dan duplikasi ID maupun pasangan `(personId, serviceId)` ditolak (AC-4).
+  - Snapshot Pengaman Pra-Impor: Menyimpan snapshot otomatis sebelum data lokal ditimpa pada alur impor JSON (`ai_account_manager_pre_import_snapshot`), serta memastikan `importedCount` mencakup seluruh entitas termasuk `handoffNotes` (AC-5).
+  - Uji Komprehensif: 10/10 tests lulus di `tests/backup-json.test.ts` dan 9/9 tests lulus di `tests/backup-sheet.test.ts` (total 65/65 tests lulus di seluruh 16 test files).
+- [TASK-REV-02] Keandalan Offline Service Worker (Precache Aset Build Vite & Perbaikan Navigasi Fallback) (`public/sw.js`, `vite.config.ts`, `src/pwa/register-sw.ts`, `tests/pwa-offline.test.ts`, `index.html`, `BLUEPRINT.md`):
+  - Fallback Navigasi Offline Ter-await: Memperbaiki cacat logika Promise-truthy pada penangan navigasi SPA di `sw.js` dengan evaluasi ter-await berurutan (`request` -> `./index.html` -> `./` -> `/`).
+  - Plugin Precache Bundel Vite: Menambahkan plugin `pwaAssetManifestPlugin` pada `vite.config.ts` untuk menghasilkan `asset-manifest.json` yang secara otomatis di-cache saat Service Worker `install`.
+  - Cache-First & Runtime Caching: Aset statis lokal dilayani instan dari cache dengan background revalidation dan auto-cloning respon 200 ke cache.
+  - Bypass Origin Eksternal: Permintaan eksternal (Google Apps Script, tautan AI eksternal) dan metode non-GET sepenuhnya di-bypass tanpa intervensi SW.
+  - Sanitasi Aksesibilitas Viewport: Menghapus pembatasan `maximum-scale=1.0, user-scalable=no` di `index.html` (WCAG 1.4.4).
+  - 9/9 test cases lulus di `tests/pwa-offline.test.ts` (total 57/57 tests lulus di 16 test files).
 - [TASK-REV-01] Integritas Restore Google Sheets (Fail-Closed, Proteksi Sheet Kosong & Skema Tetap) (`src/backup/sheet-backup.ts`, `apps-script/Code.gs`, `src/App.tsx`, `tests/backup-sheet.test.ts`, `BLUEPRINT.md`):
   - Fail-Closed Snapshot: Jika pembuatan salinan lokal gagal (kuota storage penuh atau error storage), proses restore dibatalkan seketika tanpa mengubah atau menghapus IndexedDB (AC-1).
   - Proteksi Sheet Kosong: Pemulihan dari remote Sheet yang memiliki 0 entitas ke database lokal yang memiliki entitas ditolak dengan pesan peringatan jelas untuk mencegah penghapusan data lokal akibat salah endpoint/spreadsheet baru (AC-2).

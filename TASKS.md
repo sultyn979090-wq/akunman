@@ -237,3 +237,41 @@ MODE LITE: `Docs Impact` hanya merujuk `BLUEPRINT` / `TASKS`; `Test Case` meruju
 * **Test Case:** `backup-sheet.test::restore_aborts_when_snapshot_fails`, `backup-sheet.test::restore_empty_sheet_rejected`, `backup-sheet.test::restore_confirmation_with_counts`, `backup-sheet.test::roundtrip_preserves_optional_fields`
 * **Metode Verifikasi:** Vitest test runner + pengujian kasus gagal; tempel output.
 
+---
+
+### TASK-REV-02: Keandalan Offline Service Worker (Precache Aset Build Vite & Perbaikan Navigasi Fallback)
+* **Fase:** FASE REVISI (Hardening v1.1)
+* **Deskripsi:** Memperbaiki bug ekspresi fallback navigasi pada Service Worker (`caches.match(a) || caches.match(b)` yang selalu truthy karena Promise), memastikan precache aset bundel build Vite (`./assets/*.js`, `./assets/*.css`) saat instalasi sehingga PWA dapat dibuka secara offline pada cold-start kunjungan pertama, dan menambahkan unit/integration test nyata untuk Service Worker lifecycle dan penanganan offline.
+* **Dependensi:** `TASK-012`
+* **File:** `public/sw.js`, `vite.config.ts`, `src/pwa/register-sw.ts`, `tests/pwa-offline.test.ts`, `index.html`
+* **Docs Terkait (Tier 1):** `BLUEPRINT.md` (MOD-01, NFR 2, bagian 5, 8)
+* **Docs Impact:** `BLUEPRINT.md` (bagian 5), `CHANGELOG.md`
+* **Acceptance Criteria:**
+  1. Penangan `fetch` untuk mode navigasi di `public/sw.js` mengevaluasi fallback secara berurutan dan ter-`await` dengan benar (`event.request` -> `./index.html` -> `./` -> `/`), tanpa bug logika Promise truthy.
+  2. Saat `npm run build`, plugin Vite menghasilkan manifest aset build (`asset-manifest.json`) yang mencantumkan file JS dan CSS ter-bundle di `./assets/`.
+  3. Service Worker pada event `install` mem-precache daftar `STATIC_ASSETS` dan secara otomatis mem-precache seluruh aset bundel dari `asset-manifest.json` bila tersedia, mencegah layar kosong saat cold-start mode pesawat.
+  4. Penangan `fetch` untuk aset statis menerapkan cache-first dengan runtime caching cadangan (cloning response HTTP 200 ke cache), dan mengabaikan mutlak permintaan ke origin luar (Google Apps Script) serta method non-GET.
+  5. Seluruh suite pengujian Service Worker di `tests/pwa-offline.test.ts` mengeksekusi langsung siklus hidup SW (install, activate, fetch navigasi, fetch aset, dan offline fallback) dengan mock environment dan lulus 100%.
+* **Test Case:** `pwa-offline.test::sw_precache_assets`, `pwa-offline.test::sw_navigation_fallback_offline`, `pwa-offline.test::sw_static_asset_cache_first`, `pwa-offline.test::sw_ignores_external_origins`
+* **Metode Verifikasi:** Vitest test runner + `npm run build` verifikasi asset-manifest; tempel output.
+
+---
+
+### TASK-REV-03: Validasi Semantik Impor & Integritas Relasional (JSON & Sheet)
+* **Fase:** FASE REVISI (Hardening v1.1)
+* **Deskripsi:** Memperketat validasi payload impor JSON dan restore Google Sheet dari validasi bentuk dangkal menjadi validasi semantik dan integritas relasional menyeluruh (foreign keys: Access->Person/Service, UsageLog->Access, HandoffNote->Service), isolasi kebijakan lokal (mencegah impor payload menimpa atau membypass `maxPersons`), penolakan tipe timestamp tidak valid pada `UsageLog.at` guna mencegah crash `localeCompare` pada UI riwayat, dan penambahan snapshot pengaman sebelum impor JSON.
+* **Dependensi:** `TASK-REV-01`, `TASK-REV-02`
+* **File:** `src/backup/json-backup.ts`, `src/backup/sheet-backup.ts`, `tests/backup-json.test.ts`, `tests/backup-sheet.test.ts`
+* **Docs Terkait (Tier 1):** `BLUEPRINT.md` (BR-07, BR-10, BR-12, BR-14, bagian 8)
+* **Docs Impact:** `BLUEPRINT.md` (bagian 7, 8), `CHANGELOG.md`
+* **Acceptance Criteria:**
+  1. `validateImportPayload` menolak versi skema selain versi 1 secara eksplisit.
+  2. `validateImportPayload` menegakkan batas maksimal 10 akun (BR-07, ASM-02) dan fungsi `importLocalJsonData` mempertahankan kebijakan batas `maxPersons` database lokal (tidak dapat dioverride oleh berkas impor).
+  3. Integritas relasional ditegakkan penuh: setiap `Access` wajib merujuk `personId` dan `serviceId` yang ada; setiap `UsageLog` wajib merujuk `accessId` yang ada; setiap `HandoffNote` wajib merujuk `serviceId` yang ada. Payload yang memuat record yatim (orphaned) ditolak tanpa mengubah database.
+  4. Validasi semantik tipe data: `UsageLog.at` wajib berupa string ISO 8601 valid (mencegah bug crash `b.at.localeCompare`), status `Access` limited wajib memiliki `resetAt` bertipe ISO string, URL template `Service` wajib http(s) valid, dan duplikasi ID maupun pasangan `(personId, serviceId)` ditolak.
+  5. Salinan lokal otomatis (snapshot pre-import) dibuat sebelum impor JSON menimpa IndexedDB, dan hitungan entitas yang dipulihkan (`importedCount`) menyertakan entitas `handoffNotes`.
+  6. Seluruh pengujian di `tests/backup-json.test.ts` dan `tests/backup-sheet.test.ts` memverifikasi penolakan data korup semantik dan pelestarian data lokal.
+* **Test Case:** `backup-json.test::rejects_version_mismatch`, `backup-json.test::import_ignores_payload_maxPersons_policy`, `backup-json.test::rejects_orphan_access_and_services`, `backup-json.test::rejects_orphan_logs_and_invalid_at_type`, `backup-json.test::rejects_duplicate_entities_and_pairs`, `backup-sheet.test::corrupt_relational_sheet_rejected`
+* **Metode Verifikasi:** Vitest test runner + `tsc --noEmit` + `npm run build`; tempel output.
+
+

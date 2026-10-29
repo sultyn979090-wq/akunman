@@ -168,4 +168,229 @@ describe('TASK-012: Hardening PWA, Offline & Uji Akhir', () => {
     expect(accessKeys).not.toContain('token');
     expect(accessKeys).not.toContain('credentials');
   });
+
+  describe('TASK-REV-02: Service Worker Lifecycle & Offline Hardening', () => {
+    const loadSwContext = (initialCache: Record<string, any> = {}, customFetch?: any) => {
+      const handlers: Record<string, (e: any) => void> = {};
+      const cacheStorage = new Map<string, any>(Object.entries(initialCache));
+      const addedToCache: string[] = [];
+      const deletedCaches: string[] = [];
+      const claimed = { value: false };
+
+      const mockCache = {
+        addAll: async (urls: string[]) => {
+          addedToCache.push(...urls);
+          urls.forEach((u) => cacheStorage.set(u, new Response('cached:' + u, { status: 200 })));
+        },
+        put: async (req: any, res: any) => {
+          const key = typeof req === 'string' ? req : req.url;
+          cacheStorage.set(key, res);
+        },
+        match: async (req: any) => {
+          const key = typeof req === 'string' ? req : req.url;
+          return cacheStorage.get(key) || undefined;
+        },
+      };
+
+      const caches = {
+        open: async () => mockCache,
+        keys: async () => ['ai-account-manager-v1', 'ai-account-manager-v2'],
+        delete: async (name: string) => {
+          deletedCaches.push(name);
+          return true;
+        },
+        match: async (req: any) => {
+          const key = typeof req === 'string' ? req : req.url;
+          return cacheStorage.get(key) || undefined;
+        },
+      };
+
+      const swCtx = {
+        self: {
+          addEventListener: (event: string, fn: any) => {
+            handlers[event] = fn;
+          },
+          skipWaiting: () => Promise.resolve(),
+          clients: {
+            claim: () => {
+              claimed.value = true;
+              return Promise.resolve();
+            },
+          },
+          location: { origin: 'https://example.com' },
+        },
+        caches,
+        fetch:
+          customFetch ||
+          (async (req: any) => {
+            const url = typeof req === 'string' ? req : req.url;
+            if (url.includes('asset-manifest.json')) {
+              return {
+                ok: true,
+                status: 200,
+                json: async () => ['./assets/index-rev02.js', './assets/index-rev02.css'],
+              };
+            }
+            return new Response('network-response', { status: 200 });
+          }),
+        console,
+        URL,
+        Response,
+        Promise,
+      };
+
+      const swPath = path.resolve(process.cwd(), 'public/sw.js');
+      const swCode = fs.readFileSync(swPath, 'utf-8');
+      const { Script } = require('node:vm');
+      const script = new Script(swCode);
+      script.runInNewContext(swCtx);
+
+      return { handlers, caches, mockCache, addedToCache, cacheStorage, deletedCaches, claimed };
+    };
+
+    it('sw_precache_assets - Precache shell dasar dan manifest bundel build Vite', async () => {
+      const { handlers, addedToCache } = loadSwContext();
+      expect(handlers.install).toBeDefined();
+
+      let installPromise: Promise<void> | null = null;
+      handlers.install({
+        waitUntil: (p: Promise<void>) => {
+          installPromise = p;
+        },
+      });
+
+      await installPromise;
+
+      // Verifikasi shell dasar tercache
+      expect(addedToCache).toContain('./');
+      expect(addedToCache).toContain('./index.html');
+      expect(addedToCache).toContain('./manifest.webmanifest');
+      expect(addedToCache).toContain('./icon-192.svg');
+      expect(addedToCache).toContain('./icon-512.svg');
+
+      // Verifikasi bundel build ter-precache dari asset-manifest.json
+      expect(addedToCache).toContain('./assets/index-rev02.js');
+      expect(addedToCache).toContain('./assets/index-rev02.css');
+    });
+
+    it('sw_navigation_fallback_offline - Navigasi offline menyelesaikan fallback ter-await tanpa Promise-truthy bug', async () => {
+      const fallbackHtml = new Response('<!doctype html><html><body>AI Account Manager</body></html>', { status: 200 });
+      const { handlers } = loadSwContext(
+        { './index.html': fallbackHtml },
+        async () => {
+          throw new Error('Airplane mode / network down');
+        }
+      );
+
+      expect(handlers.fetch).toBeDefined();
+
+      let respondedPromise: Promise<Response> | null = null;
+      handlers.fetch({
+        request: {
+          url: 'https://example.com/dashboard',
+          method: 'GET',
+          mode: 'navigate',
+        },
+        respondWith: (p: Promise<Response>) => {
+          respondedPromise = p;
+        },
+      });
+
+      expect(respondedPromise).not.toBeNull();
+      const res = await respondedPromise!;
+      expect(res).toBeDefined();
+      expect(res.status).toBe(200);
+      const text = await res.text();
+      expect(text).toContain('AI Account Manager');
+    });
+
+    it('sw_static_asset_cache_first - Aset statis melayani cache-first dan melakukan runtime cache untuk aset baru', async () => {
+      const cachedAsset = new Response('console.log("cached js")', { status: 200 });
+      const { handlers, cacheStorage } = loadSwContext(
+        { 'https://example.com/assets/cached.js': cachedAsset },
+        async (req: any) => new Response('network:' + (typeof req === 'string' ? req : req.url), { status: 200 })
+      );
+
+      // 1. Aset yang sudah ada di cache dikembalikan langsung
+      let cacheHitPromise: Promise<Response> | null = null;
+      handlers.fetch({
+        request: {
+          url: 'https://example.com/assets/cached.js',
+          method: 'GET',
+          mode: 'cors',
+        },
+        respondWith: (p: Promise<Response>) => {
+          cacheHitPromise = p;
+        },
+      });
+      const hitRes = await cacheHitPromise!;
+      expect(await hitRes.text()).toBe('console.log("cached js")');
+
+      // 2. Aset baru yang belum ada di cache diambil dari network dan dicache
+      let cacheMissPromise: Promise<Response> | null = null;
+      handlers.fetch({
+        request: {
+          url: 'https://example.com/assets/new-chunk.js',
+          method: 'GET',
+          mode: 'cors',
+        },
+        respondWith: (p: Promise<Response>) => {
+          cacheMissPromise = p;
+        },
+      });
+      const missRes = await cacheMissPromise!;
+      expect(await missRes.text()).toBe('network:https://example.com/assets/new-chunk.js');
+      expect(cacheStorage.has('https://example.com/assets/new-chunk.js')).toBe(true);
+    });
+
+    it('sw_ignores_external_origins - Permintaan eksternal dan non-GET diabaikan tanpa disentuh SW', async () => {
+      const { handlers } = loadSwContext();
+
+      // Permintaan POST
+      let postResponded = false;
+      handlers.fetch({
+        request: {
+          url: 'https://example.com/api/test',
+          method: 'POST',
+          mode: 'cors',
+        },
+        respondWith: () => {
+          postResponded = true;
+        },
+      });
+      expect(postResponded).toBe(false);
+
+      // Permintaan ke origin eksternal (Google Apps Script)
+      let externalResponded = false;
+      handlers.fetch({
+        request: {
+          url: 'https://script.google.com/macros/s/xyz/exec',
+          method: 'GET',
+          mode: 'cors',
+        },
+        respondWith: () => {
+          externalResponded = true;
+        },
+      });
+      expect(externalResponded).toBe(false);
+    });
+
+    it('sw_activate_cache_eviction - Menghapus cache versi lama saat aktivasi dan memanggil clients.claim()', async () => {
+      const { handlers, deletedCaches, claimed } = loadSwContext();
+      expect(handlers.activate).toBeDefined();
+
+      let activatePromise: Promise<void> | null = null;
+      handlers.activate({
+        waitUntil: (p: Promise<void>) => {
+          activatePromise = p;
+        },
+      });
+
+      await activatePromise;
+      expect(deletedCaches).toContain('ai-account-manager-v1');
+      expect(deletedCaches).not.toContain('ai-account-manager-v2');
+      expect(claimed.value).toBe(true);
+    });
+  });
 });
+
